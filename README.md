@@ -5,13 +5,14 @@ Perks is a lightweight Windows command-line tool for generating and verifying fi
 ## Usage
 
 ```bash
-Perks.exe -[md5|sha1|sha256|sha512] <path> [-f/--file <outfile.perks>] [-n/--nobanner]
-Perks.exe -v/--verify <path> [-f/--file <infile.perks>] [-n/--nobanner]
+Perks.exe -[md5|sha1|sha256|sha512] [path] [-f/--file <file.perks>] [-l/--logfile <file.log>]
+Perks.exe -v/--verify [path] [-f/--file <file.perks>] [-l/--logfile <file.log>]
 ```
 
 ## Options
 
 - `-[md5|sha1|sha256|sha512]` Specify the hash algorithm to use
+- `-l, --logfile <file>` Specify log file (default: perks.log)
 - `-v, --verify` Verify files against a previously generated hash file
 - `-f, --file <file>` Specify input/output file (default: <algorithm>.perks)
 - `-n, --nobanner` Suppresses the banner output
