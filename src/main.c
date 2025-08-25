@@ -6,7 +6,7 @@
 #include <stdbool.h>
 #include <direct.h>
 
-#define VERSION "1.0"
+#define VERSION "1.1"
 #define BUFFER_SIZE 8192
 
 typedef enum
@@ -18,6 +18,8 @@ typedef enum
     ALG_SHA512
 } Algorithm;
 
+FILE *logFile = NULL; // Global log file pointer
+
 void print_banner()
 {
     printf("\nPerks %s (x64) : (c) 8gudbits - All rights reserved.\n", VERSION);
@@ -26,18 +28,24 @@ void print_banner()
 
 void print_help(const char *program_name)
 {
-    printf("Usage:\n");
-    printf("  %s -[md5|sha1|sha256|sha512] [path] [-f/--file output.perks]\n", program_name);
-    printf("  %s -v/--verify [path] [-f/--file input.perks]\n", program_name);
-    printf("\nOptions:\n");
-    printf("  -h, --help          Show this help message\n");
-    printf("  -n, --nobanner      Suppress the banner display\n");
-    printf("  -f, --file <file>   Specify input/output file (default: <algorithm>.perks)\n");
-    printf("\nExamples:\n");
-    printf("  %s -sha256 C:\\MyFolder\n", program_name);
-    printf("  %s -md5 -f hashes.perks\n", program_name);
-    printf("  %s -v C:\\MyFolder -f hashes.perks\n", program_name);
-    printf("  %s --verify --nobanner -f hashes.perks\n", program_name);
+    const char *help = 
+        "Usage:\n"
+        "  %s -[md5|sha1|sha256|sha512] [path] [-f/--file <file.perks>] [-l/--logfile <file.log>]\n"
+        "  %s -v/--verify [path] [-f/--file <file.perks>] [-l/--logfile <file.log>]\n"
+        "\nOptions:\n"
+        "  -h, --help           Show this help message\n"
+        "  -n, --nobanner       Suppress the banner display\n"
+        "  -f, --file <file>    Specify input/output file (default: <algorithm>.perks)\n"
+        "  -v, --verify         Verify files against a previously generated hash file\n"
+        "  -l, --logfile <file> Specify log file (default: perks.log)\n"
+        "\nExamples:\n"
+        "  %s -sha256 C:\\MyFolder\n"
+        "  %s -md5 -f hashes.perks -l verification.log\n"
+        "  %s -v C:\\MyFolder -f hashes.perks\n"
+        "  %s --verify --nobanner -f hashes.perks -l\n";
+
+    printf(help, program_name, program_name, program_name, program_name, program_name, program_name);
+    if (logFile) fprintf(logFile, help, program_name, program_name, program_name, program_name, program_name, program_name);
 }
 
 const char *algorithm_to_string(Algorithm alg)
@@ -200,7 +208,9 @@ void process_directory(const char *basePath, const char *relativePath, Algorithm
         else
         {
             // Show progress: <algorithm>: <filepath>
-            printf("%s: %s\n", algorithm_to_string(alg), newRelativePath);
+            const char *progress = "%s: %s\n";
+            printf(progress, algorithm_to_string(alg), newRelativePath);
+            if (logFile) fprintf(logFile, progress, algorithm_to_string(alg), newRelativePath);
 
             char *hash = NULL;
             if (compute_file_hash(fullPath, alg, &hash))
@@ -220,7 +230,9 @@ bool generate_hashes(const char *path, Algorithm alg, const char *outFile)
     FILE *file = fopen(outFile, "w");
     if (!file)
     {
-        perror("Failed to open output file");
+        const char *error = "Failed to open output file: %s\n";
+        printf(error, outFile);
+        if (logFile) fprintf(logFile, error, outFile);
         return false;
     }
 
@@ -231,13 +243,16 @@ bool generate_hashes(const char *path, Algorithm alg, const char *outFile)
 
     // Show where the file was saved
     char absolutePath[MAX_PATH];
+    const char *saved = "\nHash file saved to: %s\n";
     if (_fullpath(absolutePath, outFile, MAX_PATH) != NULL)
     {
-        printf("\nHash file saved to: %s\n", absolutePath);
+        printf(saved, absolutePath);
+        if (logFile) fprintf(logFile, saved, absolutePath);
     }
     else
     {
-        printf("\nHash file saved to: %s\n", outFile);
+        printf(saved, outFile);
+        if (logFile) fprintf(logFile, saved, outFile);
     }
 
     return true;
@@ -248,7 +263,9 @@ bool verify_hashes(const char *path, const char *inFile)
     FILE *file = fopen(inFile, "r");
     if (!file)
     {
-        perror("Failed to open input file");
+        const char *error = "Failed to open input file: %s\n";
+        printf(error, inFile);
+        if (logFile) fprintf(logFile, error, inFile);
         return false;
     }
 
@@ -256,6 +273,9 @@ bool verify_hashes(const char *path, const char *inFile)
     if (!fgets(header, sizeof(header), file))
     {
         fclose(file);
+        const char *error = "Failed to read header from input file\n";
+        printf(error);
+        if (logFile) fprintf(logFile, error);
         return false;
     }
 
@@ -263,6 +283,9 @@ bool verify_hashes(const char *path, const char *inFile)
     if (sscanf(header, "#PERKSv1.0 %63s", algoStr) != 1)
     {
         fclose(file);
+        const char *error = "Invalid header format in input file\n";
+        printf(error);
+        if (logFile) fprintf(logFile, error);
         return false;
     }
 
@@ -270,6 +293,9 @@ bool verify_hashes(const char *path, const char *inFile)
     if (alg == ALG_UNKNOWN)
     {
         fclose(file);
+        const char *error = "Unknown algorithm in input file: %s\n";
+        printf(error, algoStr);
+        if (logFile) fprintf(logFile, error, algoStr);
         return false;
     }
 
@@ -278,6 +304,7 @@ bool verify_hashes(const char *path, const char *inFile)
     int totalFiles = 0;
     int passedFiles = 0;
     int failedFiles = 0;
+    int missingFiles = 0;
 
     while (fgets(line, sizeof(line), file))
     {
@@ -298,10 +325,24 @@ bool verify_hashes(const char *path, const char *inFile)
         char fullPath[MAX_PATH];
         snprintf(fullPath, MAX_PATH, "%s\\%s", path, filePath);
 
+        // Check if file exists first
+        DWORD fileAttributes = GetFileAttributesA(fullPath);
+        if (fileAttributes == INVALID_FILE_ATTRIBUTES || (fileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+        {
+            const char *missing = "[MISSING] %s\n";
+            printf(missing, filePath);
+            if (logFile) fprintf(logFile, missing, filePath);
+            success = false;
+            missingFiles++;
+            continue;
+        }
+
         char *actualHash = NULL;
         if (!compute_file_hash(fullPath, alg, &actualHash))
         {
-            printf("[FAILED] %s (Unable to compute hash)\n", filePath);
+            const char *failed = "[FAILED] %s (Unable to compute hash)\n";
+            printf(failed, filePath);
+            if (logFile) fprintf(logFile, failed, filePath);
             success = false;
             failedFiles++;
             continue;
@@ -309,12 +350,16 @@ bool verify_hashes(const char *path, const char *inFile)
 
         if (strcmp(actualHash, expectedHash) == 0)
         {
-            printf("[PASS] %s\n", filePath);
+            const char *pass = "[PASS] %s\n";
+            printf(pass, filePath);
+            if (logFile) fprintf(logFile, pass, filePath);
             passedFiles++;
         }
         else
         {
-            printf("[FAIL] %s\n", filePath);
+            const char *fail = "[FAIL] %s\n";
+            printf(fail, filePath);
+            if (logFile) fprintf(logFile, fail, filePath);
             success = false;
             failedFiles++;
         }
@@ -324,12 +369,26 @@ bool verify_hashes(const char *path, const char *inFile)
     fclose(file);
 
     // Print summary
-    printf("\nVerification complete:\n");
-    printf("  Total files: %d\n", totalFiles);
-    printf("  Passed: %d\n", passedFiles);
-    printf("  Failed: %d\n", failedFiles);
+    const char *summary = 
+        "\nVerification complete:\n"
+        "  Total files: %d\n"
+        "  Passed: %d\n"
+        "  Failed: %d\n"
+        "  Missing: %d\n";
+    
+    printf(summary, totalFiles, passedFiles, failedFiles, missingFiles);
+    if (logFile) fprintf(logFile, summary, totalFiles, passedFiles, failedFiles, missingFiles);
 
     return success;
+}
+
+void cleanup_logfile()
+{
+    if (logFile)
+    {
+        fclose(logFile);
+        logFile = NULL;
+    }
 }
 
 int main(int argc, char *argv[])
@@ -339,9 +398,12 @@ int main(int argc, char *argv[])
     Algorithm alg = ALG_UNKNOWN;
     const char *path = ".";
     const char *file = NULL;
+    const char *logFileName = NULL;
     bool verifyMode = false;
     bool fileSpecified = false;
+    bool logFileSpecified = false;
 
+    // Parse command line arguments
     for (int i = 1; i < argc; i++)
     {
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0)
@@ -364,6 +426,18 @@ int main(int argc, char *argv[])
                 fileSpecified = true;
             }
         }
+        else if (strcmp(argv[i], "-l") == 0 || strcmp(argv[i], "--logfile") == 0)
+        {
+            logFileSpecified = true;
+            if (i + 1 < argc && argv[i + 1][0] != '-')
+            {
+                logFileName = argv[++i];
+            }
+            else
+            {
+                logFileName = "perks.log";
+            }
+        }
         else if (strncmp(argv[i], "-", 1) == 0)
         {
             if (strcmp(argv[i], "-md5") == 0)
@@ -382,6 +456,19 @@ int main(int argc, char *argv[])
         }
     }
 
+    // Set up log file if specified
+    if (logFileSpecified)
+    {
+        logFile = fopen(logFileName, "w");
+        if (!logFile)
+        {
+            printf("Warning: Could not open log file %s for writing\n", logFileName);
+        }
+    }
+
+    // Register cleanup function
+    atexit(cleanup_logfile);
+
     if (showBanner)
     {
         print_banner();
@@ -389,7 +476,7 @@ int main(int argc, char *argv[])
 
     if (showHelp)
     {
-        print_help(argv[0]); // Pass the actual executable name
+        print_help(argv[0]);
         return 0;
     }
 
@@ -398,7 +485,9 @@ int main(int argc, char *argv[])
     {
         if (verifyMode)
         {
-            printf("Error: Input file must be specified in verify mode.\n");
+            const char *error = "Error: Input file must be specified in verify mode.\n";
+            printf(error);
+            if (logFile) fprintf(logFile, error);
             print_help(argv[0]);
             return 1;
         }
@@ -414,7 +503,9 @@ int main(int argc, char *argv[])
     {
         if (!file)
         {
-            printf("Error: Input file must be specified in verify mode.\n");
+            const char *error = "Error: Input file must be specified in verify mode.\n";
+            printf(error);
+            if (logFile) fprintf(logFile, error);
             print_help(argv[0]);
             return 1;
         }
@@ -424,13 +515,17 @@ int main(int argc, char *argv[])
     {
         if (alg == ALG_UNKNOWN)
         {
-            printf("Error: No algorithm specified.\n");
+            const char *error = "Error: No algorithm specified.\n";
+            printf(error);
+            if (logFile) fprintf(logFile, error);
             print_help(argv[0]);
             return 1;
         }
         if (!file)
         {
-            printf("Error: Output file must be specified.\n");
+            const char *error = "Error: Output file must be specified.\n";
+            printf(error);
+            if (logFile) fprintf(logFile, error);
             print_help(argv[0]);
             return 1;
         }
